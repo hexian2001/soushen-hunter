@@ -28,13 +28,19 @@ cp -r soushen-hunter ~/.openclaw/skills/
 
 ```bash
 pip install playwright
-playwright install chromium
 ```
 
-或使用系统 Chrome：
+**Chrome 自动检测**
+
+脚本会自动检测以下位置的 Chrome：
+- 环境变量 `CHROME_PATH` 或 `CHROME_BIN`
+- 系统 PATH 中的 `google-chrome`, `chromium` 等
+- 常见安装路径（Linux/macOS/Windows）
+
+手动指定 Chrome 路径：
 ```bash
-# 设置 Chrome 路径（可选）
 export CHROME_PATH=/usr/bin/google-chrome
+python scripts/bing_search.py "搜索关键词"
 ```
 
 ## 🚀 使用

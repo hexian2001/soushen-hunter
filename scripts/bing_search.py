@@ -7,6 +7,8 @@ Bing Search Agent - 高性能搜索引擎
 import asyncio
 import json
 import sys
+import os
+import shutil
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, asdict
 from urllib.parse import urljoin, urlparse
@@ -16,6 +18,46 @@ try:
 except ImportError:
     print("ERROR: playwright not installed. Run: pip install playwright")
     sys.exit(1)
+
+
+def find_chrome_executable() -> Optional[str]:
+    """自动查找 Chrome 可执行文件路径"""
+    
+    # 可能的 Chrome 路径列表
+    possible_paths = [
+        # 环境变量
+        os.environ.get('CHROME_PATH'),
+        os.environ.get('CHROME_BIN'),
+        # Linux 常见路径
+        '/usr/bin/google-chrome',
+        '/usr/bin/google-chrome-stable',
+        '/usr/bin/chromium',
+        '/usr/bin/chromium-browser',
+        '/snap/bin/chromium',
+        # macOS
+        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+        '/Applications/Chromium.app/Contents/MacOS/Chromium',
+        # Windows
+        r'C:\Program Files\Google\Chrome\Application\chrome.exe',
+        r'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe',
+        # 用户本地安装
+        os.path.expanduser('~/.local/bin/chrome-for-testing-dir/chrome'),
+        os.path.expanduser('~/.local/bin/chrome-for-testing/chrome'),
+        os.path.expanduser('~/chrome-linux64/chrome'),
+    ]
+    
+    for path in possible_paths:
+        if path and os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+    
+    # 尝试在 PATH 中查找
+    chrome_names = ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser', 'chrome']
+    for name in chrome_names:
+        path = shutil.which(name)
+        if path:
+            return path
+    
+    return None
 
 
 @dataclass
@@ -43,27 +85,36 @@ class PageElements:
 class BingSearchAgent:
     """Bing 搜索代理 - 高性能版本"""
     
-    def __init__(self, headless: bool = True):
+    def __init__(self, headless: bool = True, chrome_path: Optional[str] = None):
         self.headless = headless
+        self.chrome_path = chrome_path or find_chrome_executable()
         self.browser: Optional[Browser] = None
         self.page: Optional[Page] = None
         
     async def __aenter__(self):
         self.playwright = await async_playwright().start()
         
-        # 使用系统 Chrome
-        chrome_path = '/home/admin/.local/bin/chrome-for-testing-dir/chrome'
-        print(f"Using system Chrome: {chrome_path}")
-        
-        self.browser = await self.playwright.chromium.launch(
-            executable_path=chrome_path,
-            headless=self.headless,
-            args=[
+        # 配置启动参数
+        launch_options = {
+            'headless': self.headless,
+            'args': [
                 '--disable-blink-features=AutomationControlled',
                 '--disable-web-security',
                 '--disable-features=IsolateOrigins,site-per-process',
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
             ]
-        )
+        }
+        
+        # 如果找到 Chrome 路径，使用它
+        if self.chrome_path:
+            print(f"Using Chrome: {self.chrome_path}")
+            launch_options['executable_path'] = self.chrome_path
+        else:
+            print("Chrome not found, using Playwright bundled Chromium...")
+            print("Tip: Install Chrome or set CHROME_PATH environment variable")
+        
+        self.browser = await self.playwright.chromium.launch(**launch_options)
         context = await self.browser.new_context(
             user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             viewport={'width': 1920, 'height': 1080},
@@ -264,13 +315,18 @@ async def main():
     """主函数 - CLI 入口"""
     if len(sys.argv) < 2:
         print("Usage: python bing_search.py <query> [--deep <url>]")
+        print("\nEnvironment variables:")
+        print("  CHROME_PATH    Path to Chrome executable (optional)")
         sys.exit(1)
     
     query = sys.argv[1]
     deep_mode = '--deep' in sys.argv
     deep_url = sys.argv[sys.argv.index('--deep') + 1] if deep_mode else None
     
-    async with BingSearchAgent(headless=True) as agent:
+    # 支持通过环境变量指定 Chrome 路径
+    chrome_path = os.environ.get('CHROME_PATH') or os.environ.get('CHROME_BIN')
+    
+    async with BingSearchAgent(headless=True, chrome_path=chrome_path) as agent:
         if deep_url:
             # 深度分析模式
             elements = await agent.extract_page_elements(deep_url)
