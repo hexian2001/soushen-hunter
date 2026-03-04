@@ -205,8 +205,9 @@ class BingSearchAgent:
     async def extract_page_elements(self, url: str) -> Optional[PageElements]:
         """深度提取页面所有关键元素 - 增强版"""
         try:
-            await self.page.goto(url, wait_until='domcontentloaded')
-            await asyncio.sleep(0.5)  # 短暂等待动态内容
+            # 增加超时到60秒，网络慢也能加载
+            await self.page.goto(url, wait_until='domcontentloaded', timeout=60000)
+            await asyncio.sleep(1)  # 等待动态内容渲染
             
             # 提取基础信息
             title = await self.page.title()
