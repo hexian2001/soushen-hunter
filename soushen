@@ -1,26 +1,195 @@
 #!/usr/bin/env python3
 """
 搜神猎手 (SouShen Hunter) - 主入口
-高性能 Bing 搜索引擎 - 零 API 费用
+高性能搜索引擎 - 支持 Bing 和 Google
 """
 
 import sys
 import os
+import json
 
 # 将 scripts 目录添加到路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'scripts'))
 
-from bing_search import main as bing_main
+# 配置文件路径
+CONFIG_FILE = os.path.join(os.path.dirname(__file__), '.soushen_config.json')
+
+# 默认配置
+DEFAULT_CONFIG = {
+    "default_engine": "bing",  # 默认搜索引擎：bing 或 google
+    "default_num_results": 10  # 默认结果数量
+}
+
+
+def load_config():
+    """加载配置文件"""
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+                # 合并默认配置
+                return {**DEFAULT_CONFIG, **config}
+        except:
+            pass
+    return DEFAULT_CONFIG
+
+
+def save_config(config):
+    """保存配置文件"""
+    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+        json.dump(config, f, ensure_ascii=False, indent=2)
+
+
+def print_banner():
+    """打印品牌标识"""
+    print("╔══════════════════════════════════════╗")
+    print("║     🔍 搜神猎手 (SouShen Hunter)      ║")
+    print("║   高性能搜索引擎 - 零 API 费用       ║")
+    print("╚══════════════════════════════════════╝")
+    print()
+
+
+def print_help():
+    """打印帮助信息"""
+    config = load_config()
+    help_text = {
+        "tool": "soushen-hunter",
+        "default_engine": config["default_engine"],
+        "usage": {
+            "search": "./soushen <query> [--num N] [--engine ENGINE]",
+            "deep": "./soushen --deep <url> [--engine ENGINE]",
+            "config": "./soushen --config [--engine ENGINE] [--num N]"
+        },
+        "options": {
+            "--num": "搜索结果数量 (默认 10)",
+            "--engine": "搜索引擎：bing 或 google (默认由配置决定)",
+            "--deep": "深度页面分析模式",
+            "--config": "显示或修改配置",
+            "--set-default-engine": "设置默认搜索引擎 (bing/google)",
+            "--help": "显示帮助信息"
+        },
+        "examples": [
+            "./soushen 'OpenClaw AI'",
+            "./soushen 'AI 人工智能' --num 20",
+            "./soushen 'AI 人工智能' --engine google",
+            "./soushen --deep https://example.com",
+            "./soushen --config --engine google  # 设置默认使用 Google",
+            "./soushen --set-default-engine bing  # 设置默认使用 Bing"
+        ]
+    }
+    print(json.dumps(help_text, ensure_ascii=False, indent=2))
+
+
+def main():
+    """主函数"""
+    args = sys.argv[1:]
+    config = load_config()
+
+    # 处理配置命令
+    if '--set-default-engine' in args:
+        idx = args.index('--set-default-engine')
+        if idx + 1 < len(args):
+            engine = args[idx + 1].lower()
+            if engine in ['bing', 'google']:
+                config['default_engine'] = engine
+                save_config(config)
+                print(f"默认搜索引擎已设置为：{engine}")
+                sys.exit(0)
+            else:
+                print(json.dumps({"error": "无效的搜索引擎，请使用 bing 或 google"}, ensure_ascii=False))
+                sys.exit(1)
+
+    # 显示帮助
+    if len(args) < 1 or '--help' in args:
+        print_banner()
+        print_help()
+        sys.exit(1)
+
+    # 解析参数
+    query = None
+    url = None
+    num_results = config.get('default_num_results', 10)
+    engine = config.get('default_engine', 'bing')
+    mode = 'search'
+    text_offset = 0
+    text_limit = 10000
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == '--num':
+            if i + 1 < len(args):
+                try:
+                    num_results = int(args[i + 1])
+                    i += 2
+                    continue
+                except ValueError:
+                    pass
+        elif arg == '--engine':
+            if i + 1 < len(args):
+                engine = args[i + 1].lower()
+                if engine not in ['bing', 'google']:
+                    print(json.dumps({"error": "无效的搜索引擎，请使用 bing 或 google"}, ensure_ascii=False))
+                    sys.exit(1)
+                i += 2
+                continue
+        elif arg == '--deep':
+            mode = 'deep'
+            if i + 1 < len(args):
+                url = args[i + 1]
+                i += 2
+                continue
+        elif arg == '--config':
+            # 显示当前配置
+            print(json.dumps({"current_config": config}, ensure_ascii=False, indent=2))
+            # 如果同时指定了 --engine，则更新配置
+            if '--engine' in args:
+                idx = args.index('--engine')
+                if idx + 1 < len(args):
+                    new_engine = args[idx + 1].lower()
+                    if new_engine in ['bing', 'google']:
+                        config['default_engine'] = new_engine
+                        save_config(config)
+                        print(f"默认搜索引擎已设置为：{new_engine}")
+            sys.exit(0)
+        elif not arg.startswith('--'):
+            if mode == 'search':
+                query = arg
+        i += 1
+
+    # 验证参数
+    if mode == 'search' and not query:
+        print(json.dumps({"error": "请提供搜索关键词"}, ensure_ascii=False))
+        sys.exit(1)
+    if mode == 'deep' and not url:
+        print(json.dumps({"error": "--deep 需要提供 URL"}, ensure_ascii=False))
+        sys.exit(1)
+
+    # 导入对应的搜索模块
+    if engine == 'google':
+        from google_search import GoogleSearchAgent, format_output, format_page_elements
+        agent_class = GoogleSearchAgent
+    else:
+        from bing_search import BingSearchAgent, format_output, format_page_elements
+        agent_class = BingSearchAgent
+
+    # 执行搜索
+    import asyncio
+
+    async def run():
+        async with agent_class(headless=True) as agent:
+            if mode == 'deep':
+                elements = await agent.extract_page_elements(url)
+                if elements:
+                    print(format_page_elements(elements, text_offset=text_offset, text_limit=text_limit))
+                else:
+                    print(json.dumps({"error": "页面分析失败"}, ensure_ascii=False))
+            else:
+                results = await agent.search(query, num_results=num_results)
+                print(format_output(results))
+
+    asyncio.run(run())
+
 
 if __name__ == '__main__':
-    # 添加品牌标识
-    if len(sys.argv) < 2 or '--help' in sys.argv:
-        print("╔══════════════════════════════════════╗")
-        print("║     🔍 搜神猎手 (SouShen Hunter)      ║")
-        print("║   高性能搜索引擎 - 零 API 费用       ║")
-        print("╚══════════════════════════════════════╝")
-        print()
-    
-    # 调用主函数
-    import asyncio
-    asyncio.run(bing_main())
+    main()

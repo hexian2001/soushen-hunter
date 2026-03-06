@@ -26,6 +26,7 @@ def find_chrome_executable() -> Optional[str]:
     possible_paths = [
         os.environ.get('CHROME_PATH'),
         os.environ.get('CHROME_BIN'),
+        '/root/ezisall/chrome-linux64/chrome',
         '/usr/bin/google-chrome',
         '/usr/bin/google-chrome-stable',
         '/usr/bin/chromium',
@@ -102,6 +103,21 @@ class BingSearchAgent:
                 '--disable-features=IsolateOrigins,site-per-process',
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--disable-software-rasterizer',
+                '--disable-extensions',
+                '--disable-logging',
+                '--log-level=3',
+                '--remote-debugging-port=0',
+                '--disable-background-networking',
+                '--disable-default-apps',
+                '--disable-sync',
+                '--disable-translate',
+                '--metrics-recording-only',
+                '--mute-audio',
+                '--no-first-run',
+                '--safebrowsing-disable-auto-update',
             ]
         }
         
@@ -151,14 +167,35 @@ class BingSearchAgent:
         return results[:num_results]
     
     async def _extract_result(self, element) -> Optional[SearchResult]:
-        """从单个元素提取搜索结果"""
+        """从单个元素提取搜索结果 - 修复版（过滤图片/视频结果）"""
         try:
-            title_elem = await element.query_selector('h2 a, .b_title a, a')
+            # 优先找 h2 a 或 .b_title a（文字结果），避免匹配到图片的 <a>
+            title_elem = await element.query_selector('h2 a, .b_title a')
+            
+            # 如果没找到，再尝试找第一个有文字的 <a>
+            if not title_elem:
+                all_links = await element.query_selector_all('a[href]')
+                for link in all_links:
+                    text = await link.inner_text()
+                    href = await link.get_attribute('href')
+                    # 过滤图片链接和空标题
+                    if text and text.strip() and href and not href.startswith('/images/'):
+                        title_elem = link
+                        break
+            
             if not title_elem:
                 return None
                 
             title = await title_elem.inner_text()
             url = await title_elem.get_attribute('href')
+            
+            # 过滤掉 Bing 内部图片/视频链接
+            if not url or url.startswith('/images/') or url.startswith('/videos/'):
+                return None
+                
+            # 过滤空标题
+            if not title or not title.strip():
+                return None
             
             snippet_elem = await element.query_selector('.b_caption p, .b_snippet, p')
             snippet = await snippet_elem.inner_text() if snippet_elem else ''
@@ -357,9 +394,20 @@ def parse_args():
         'query': None,
         'url': None,
         'text_offset': 0,
-        'text_limit': 10000
+        'text_limit': 10000,
+        'num_results': 10
     }
-    
+
+    if '--num' in args:
+        idx = args.index('--num')
+        if idx + 1 < len(args):
+            try:
+                result['num_results'] = int(args[idx + 1])
+                args.pop(idx + 1)
+                args.pop(idx)
+            except ValueError:
+                pass
+
     if '--text-offset' in args:
         idx = args.index('--text-offset')
         if idx + 1 < len(args):
@@ -405,7 +453,7 @@ async def main():
         help_text = {
             "tool": "soushen-hunter",
             "usage": {
-                "search": "python bing_search.py <query>",
+                "search": "python bing_search.py <query> [--num N]",
                 "deep": "python bing_search.py --deep <url> [--text-offset N] [--text-limit N]"
             },
             "options": {
@@ -414,6 +462,7 @@ async def main():
             },
             "examples": [
                 "python bing_search.py 'OpenClaw AI'",
+                "python bing_search.py 'AI' --num 20",
                 "python bing_search.py --deep https://example.com",
                 "python bing_search.py --deep https://example.com --text-limit 50000",
                 "python bing_search.py --deep https://example.com --text-offset 10000 --text-limit 10000"
@@ -426,7 +475,7 @@ async def main():
         sys.exit(1)
     
     chrome_path = os.environ.get('CHROME_PATH') or os.environ.get('CHROME_BIN')
-    
+
     async with BingSearchAgent(headless=True, chrome_path=chrome_path) as agent:
         if parsed['mode'] == 'deep':
             url = parsed['url']
@@ -438,7 +487,7 @@ async def main():
             else:
                 print(json.dumps({"error": "页面分析失败"}, ensure_ascii=False))
         else:
-            results = await agent.search(parsed['query'], num_results=10)
+            results = await agent.search(parsed['query'], num_results=parsed['num_results'])
             print(format_output(results))
 
 
